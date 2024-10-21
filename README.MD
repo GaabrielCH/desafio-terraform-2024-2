@@ -13,7 +13,7 @@ provider "aws" {
 
 
 
- ### Variáveis projeto e candidato
+ ### Variáveis projeto, candidato e allowed_ip
 
  ```hc1
 variable "projeto" {
@@ -26,6 +26,12 @@ variable "candidato" {
     description = "Nome do candidato"
     type        = string
     default     = "SeuNome"
+}
+
+variable "allowed_ip" {
+  description = "IP confiável para acessar via SSH"
+  type        = string
+  default     = "IP_CONFIÁVEL_AQUI" # Substitua pelo seu IP
 }
 ```
 - Define duas variáveis para o uso no codigo que irá vir.
@@ -119,35 +125,33 @@ resource "aws_route_table" "main_route_table" {
 ### Segurança, aws_security_group
 
 ```hc1
-resource "aws_security_group" "main_sg" {
-    name        = "${var.projeto}-${var.candidato}-sg"
-    description = "Permitir SSH de qualquer lugar e todo o tráfego de saída"
-    vpc_id      = aws_vpc.main_vpc.id
+resource "aws_security_group" "ssh_sg" {
+  name        = "${var.projeto}-${var.candidato}-ssh-sg"
+  description = "Permitir SSH de IP confiável"
+  vpc_id      = aws_vpc.main_vpc.id
 
-    ingress {
-        description      = "Allow SSH from anywhere"
-        from_port        = 22
-        to_port          = 22
-        protocol         = "tcp"
-        cidr_blocks      = ["0.0.0.0/0"]
-        ipv6_cidr_blocks = ["::/0"]
-    }
+  ingress {
+    description = "Allow SSH trusted IP"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["${var.allowed_ip}/32"]
+  }
 
-    egress {
-        description      = "Allow all outbound traffic"
-        from_port        = 0
-        to_port          = 0
-        protocol         = "-1"
-        cidr_blocks      = ["0.0.0.0/0"]
-        ipv6_cidr_blocks = ["::/0"]
-    }
+  egress {
+    description = "Allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
-    tags = {
-        Name = "${var.projeto}-${var.candidato}-sg"
-        }
-    }
+  tags = {
+    Name = "${var.projeto}-${var.candidato}-ssh-sg"
+  }
+}
 ```
-- Cria um grupo de segurança permitindo o acesso SSH(porta 22) de qualquer lugar, permitindo também todo tráfego de saída.
+- Cria um grupo de segurança permitindo o acesso SSH(porta 22) de apenas o ip confiavel, permitindo também todo tráfego de saída.
 
 ### AWS Debian, aws_ami e debian12
 
@@ -174,33 +178,35 @@ data "aws_ami" "debian12" {
 
 ```hc1
  resource "aws_instance" "debian_ec2" {
-    ami             = data.aws_ami.debian12.id
-    instance_type   = "t2.micro"
-    subnet_id       = aws_subnet.main_subnet.id
-    key_name        = aws_key_pair.ec2_key_pair.key_name
-    security_groups = [aws_security_group.main_sg.name]
+  ami             = data.aws_ami.debian12.id
+  instance_type   = "t2.micro"
+  subnet_id       = aws_subnet.main_subnet.id
+  key_name        = aws_key_pair.ec2_key_pair.key_name
+  security_groups = [
+    aws_security_group.ssh_sg.name
+  ]
 
-    associate_public_ip_address = true
+  associate_public_ip_address = true
 
-    root_block_device {
-        volume_size           = 20
-        volume_type           = "gp2"
-        delete_on_termination = true
-    }
+  root_block_device {
+    volume_size           = 20
+    volume_type           = "gp2"
+    delete_on_termination = true
+  }
 
-    user_data = <<-EOF
+  user_data = <<-EOF
               #!/bin/bash
               apt-get update -y
               apt-get upgrade -y
-              apt-get install -y nginx
+              apt-get install nginx -y
               systemctl start nginx
               systemctl enable nginx
               EOF
 
-    tags = {
-        Name = "${var.projeto}-${var.candidato}-ec2"
-        }
-    }
+  tags = {
+    Name = "${var.projeto}-${var.candidato}-ec2"
+  }
+}
 ```
 - Cria uma instância de EC2 com o Debian 12 mais recente.
     - No momento da inicialização do script o user_data é executado :
@@ -226,3 +232,8 @@ output "private_key" {
 ```
 - private_key : Chave privada para o acessar a instância EC2, sensível para nao aparecer em logs.
 - ec2_public_ip : Exibe o ip público. 
+
+### Possiveis Modificações não feitas
+- Modularização.
+- Security group do Ngnix.
+- terraform output
