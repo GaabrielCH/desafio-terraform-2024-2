@@ -14,6 +14,12 @@ variable "candidato" {
   default     = "SeuNome"
 }
 
+variable "allowed_ip" {
+  description = "IP confiável para acessar via SSH"
+  type        = string
+  default     = "IP_CONFIÁVEL_AQUI" # Substitua pelo seu IP
+}
+
 resource "tls_private_key" "ec2_key" {
   algorithm = "RSA"
   rsa_bits  = 2048
@@ -74,31 +80,29 @@ resource "aws_route_table_association" "main_association" {
   }
 }
 
-resource "aws_security_group" "main_sg" {
-  name        = "${var.projeto}-${var.candidato}-sg"
-  description = "Permitir SSH de qualquer lugar e todo o tráfego de saída"
+resource "aws_security_group" "ssh_sg" {
+  name        = "${var.projeto}-${var.candidato}-ssh-sg"
+  description = "Permitir SSH de IP confiável"
   vpc_id      = aws_vpc.main_vpc.id
 
   ingress {
-    description      = "Allow SSH from anywhere"
-    from_port        = 22
-    to_port          = 22
-    protocol         = "tcp"
-    cidr_blocks      = ["0.0.0.0/0"]
-    ipv6_cidr_blocks = ["::/0"]
+    description = "Allow SSH trusted IP"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["${var.allowed_ip}/32"]
   }
 
   egress {
-    description      = "Allow all outbound traffic"
-    from_port        = 0
-    to_port          = 0
-    protocol         = "-1"
-    cidr_blocks      = ["0.0.0.0/0"]
-    ipv6_cidr_blocks = ["::/0"]
+    description = "Allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   tags = {
-    Name = "${var.projeto}-${var.candidato}-sg"
+    Name = "${var.projeto}-${var.candidato}-ssh-sg"
   }
 }
 
@@ -123,7 +127,10 @@ resource "aws_instance" "debian_ec2" {
   instance_type   = "t2.micro"
   subnet_id       = aws_subnet.main_subnet.id
   key_name        = aws_key_pair.ec2_key_pair.key_name
-  security_groups = [aws_security_group.main_sg.name]
+  security_groups = [
+    aws_security_group.ssh_sg.name,
+    aws_security_group.nginx_sg.name
+  ]
 
   associate_public_ip_address = true
 
@@ -137,7 +144,7 @@ resource "aws_instance" "debian_ec2" {
               #!/bin/bash
               apt-get update -y
               apt-get upgrade -y
-              apt-get install -y nginx
+              apt-get install nginx -y
               systemctl start nginx
               systemctl enable nginx
               EOF
